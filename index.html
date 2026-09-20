@@ -440,6 +440,17 @@
             <button class="btn btn-outline clickable" onclick="goSection('calculadora')">🧮 Abrir calculadora</button>
           </div>
         </div>
+        <div class="card">
+          <h3>💾 Copia de seguridad</h3>
+          <p style="font-size:13.5px;color:var(--text-soft);margin-bottom:10px">Tus datos se guardan solo en este dispositivo. Guardá una copia de vez en cuando, o usala para pasarlos a otro celular o computadora.</p>
+          <p id="copiaUltima" style="font-size:13.5px;font-weight:700;margin-bottom:12px"></p>
+          <div class="btn-row">
+            <button class="btn btn-primary clickable" onclick="exportarCopia()">⬇️ Guardar copia</button>
+            <button class="btn btn-outline clickable" id="btnCompartirCopia" style="display:none" onclick="compartirCopia()">📤 Compartir copia</button>
+            <button class="btn btn-outline clickable" onclick="document.getElementById('inpImportarCopia').click()">⬆️ Recuperar copia</button>
+          </div>
+          <input type="file" id="inpImportarCopia" accept=".json,application/json" style="display:none" onchange="importarCopia(this)">
+        </div>
       </section>
 
       <!-- MATERIAS -->
@@ -1381,6 +1392,92 @@ function formatFecha(f){
   return `${d}/${m}/${y}`;
 }
 
+/* ===================== COPIA DE SEGURIDAD ===================== */
+const COPIA_APP = 'marielis-planillas';
+const COPIA_EXCLUIDAS = ['app_marielis_backup_antes_de_trimestres','app_marielis_backup_antes_de_importar','app_marielis_ultima_copia'];
+function datosActuales(){
+  const datos = {};
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(k && k.startsWith('app_marielis_') && !COPIA_EXCLUIDAS.includes(k)) datos[k] = localStorage.getItem(k);
+    }
+  }catch(e){}
+  return datos;
+}
+function armarCopia(){
+  persistAll();
+  return { app:COPIA_APP, version:1, fecha:new Date().toISOString(), datos:datosActuales() };
+}
+function nombreArchivoCopia(){
+  return 'copia-planillas-'+new Date().toISOString().slice(0,10)+'.json';
+}
+function marcarCopiaGuardada(){
+  saveData('app_marielis_ultima_copia', new Date().toISOString());
+  renderCopia();
+}
+function exportarCopia(){
+  const blob = new Blob([JSON.stringify(armarCopia())], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombreArchivoCopia();
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1500);
+  marcarCopiaGuardada();
+  showToast('Copia guardada en tus descargas');
+}
+async function compartirCopia(){
+  const archivo = new File([JSON.stringify(armarCopia())], nombreArchivoCopia(), {type:'application/json'});
+  try{
+    await navigator.share({files:[archivo], title:'Copia de seguridad de mis planillas'});
+    marcarCopiaGuardada();
+  }catch(e){ /* la persona canceló */ }
+}
+function importarCopia(input){
+  const archivo = input.files && input.files[0];
+  input.value = '';
+  if(!archivo) return;
+  const lector = new FileReader();
+  lector.onload = ()=>{
+    let copia;
+    try{ copia = JSON.parse(lector.result); }
+    catch(e){ showToast('El archivo no es una copia válida'); return; }
+    if(!copia || copia.app!==COPIA_APP || !copia.datos || typeof copia.datos!=='object'){
+      showToast('Ese archivo no es una copia de esta app'); return;
+    }
+    const claves = Object.keys(copia.datos).filter(k=>k.startsWith('app_marielis_') && !COPIA_EXCLUIDAS.includes(k) && typeof copia.datos[k]==='string');
+    if(claves.length===0){ showToast('La copia está vacía'); return; }
+    const fecha = copia.fecha ? new Date(copia.fecha).toLocaleDateString('es-AR') : 'fecha desconocida';
+    if(!confirm('Vas a reemplazar TODOS los datos de este dispositivo por los de la copia del '+fecha+'. ¿Querés continuar?')) return;
+    try{
+      // por las dudas, queda guardada una copia de lo que había antes
+      localStorage.setItem('app_marielis_backup_antes_de_importar', JSON.stringify(datosActuales()));
+      Object.keys(datosActuales()).forEach(k=>localStorage.removeItem(k));
+      claves.forEach(k=>localStorage.setItem(k, copia.datos[k]));
+    }catch(e){ showToast('No se pudo recuperar la copia'); return; }
+    location.reload();
+  };
+  lector.readAsText(archivo);
+}
+function renderCopia(){
+  const el = document.getElementById('copiaUltima');
+  if(!el) return;
+  const ult = loadData('app_marielis_ultima_copia', null);
+  const tieneDatos = state.materias.length>0;
+  if(!ult){
+    el.textContent = tieneDatos ? '⚠️ Todavía no guardaste ninguna copia.' : 'Todavía no guardaste ninguna copia.';
+  } else {
+    const dias = Math.floor((Date.now()-new Date(ult).getTime())/86400000);
+    const txt = 'Última copia: '+new Date(ult).toLocaleDateString('es-AR');
+    el.textContent = (tieneDatos && dias>30) ? '⚠️ '+txt+' (hace más de un mes)' : txt;
+  }
+  const btn = document.getElementById('btnCompartirCopia');
+  try{
+    const prueba = new File(['{}'], 'copia.json', {type:'application/json'});
+    if(btn && navigator.canShare && navigator.canShare({files:[prueba]})) btn.style.display = '';
+  }catch(e){}
+}
+
 /* ===================== IMPRESIÓN ===================== */
 let impMateriaId = null;
 const CORTOS_NOTAS = {
@@ -1725,6 +1822,7 @@ function renderAll(){
   renderChecklist();
   renderSeguimiento();
   updateProgress();
+  renderCopia();
   goSection('inicio');
 }
 
