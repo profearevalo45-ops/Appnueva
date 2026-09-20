@@ -121,6 +121,22 @@
   .email-capture input::placeholder{ color:rgba(244,241,232,.5); }
   .email-capture input:focus{ border-color:var(--accent); background:rgba(255,255,255,.12); }
 
+  .btn-acceso{
+    margin-top:6px;
+    background:linear-gradient(135deg, var(--accent), var(--primary));
+    color:#fff; border:none; border-radius:var(--radius-btn);
+    padding:14px 36px; font-size:16px; font-weight:700; letter-spacing:.3px;
+    box-shadow:0 12px 28px rgba(56,142,60,.35); min-height:50px;
+  }
+  .btn-acceso:active{ transform:scale(.97); }
+  .acceso-msg{ color:#c7d6c2; font-size:13.5px; line-height:1.5; max-width:320px; }
+  .acceso-msg.error{ color:#ffb4a8; font-weight:600; }
+  .acceso-link{
+    background:transparent; color:#f4f1e8; border:1.5px solid rgba(255,255,255,.35);
+    border-radius:var(--radius-btn); padding:11px 20px; font-size:14px; font-weight:600; min-height:44px;
+  }
+  #accesoWrap input{ text-transform:uppercase; letter-spacing:1.5px; }
+
   /* ---------- APP SHELL ---------- */
   #app{ display:none; }
   #app.show{ display:block; }
@@ -356,6 +372,16 @@
   <div class="welcome-badge">MARIELIS · ORGANIZACIÓN DOCENTE</div>
   <h1 class="welcome-title">Planillas y Organización Escolar</h1>
   <p class="welcome-quote" id="welcomeSubtitle">Cada nota, cada alumno y cada fecha en un solo lugar, sin depender de internet.</p>
+
+  <div id="accesoWrap" class="email-capture" style="display:none">
+    <label for="inputCodigoAcceso">Ingresá tu código de acceso</label>
+    <input type="text" id="inputCodigoAcceso" placeholder="XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false"
+           onkeydown="if(event.key==='Enter') validarCodigoAcceso()">
+    <p id="accesoMensaje" class="acceso-msg"></p>
+    <button id="btnAcceso" class="btn-acceso clickable" onclick="validarCodigoAcceso()">Ingresar</button>
+    <button id="btnAccesoCopia" class="acceso-link clickable" style="display:none" onclick="exportarCopia()">💾 Guardar copia de mis datos</button>
+    <p id="accesoContacto" class="acceso-msg"></p>
+  </div>
 
   <div id="emailCaptureWrap" class="email-capture">
     <label for="inputEmailDocente">Ingresá tu correo electrónico para comenzar</label>
@@ -799,6 +825,7 @@
 <!-- Área que se imprime (oculta en pantalla) -->
 <div id="printArea"></div>
 
+<script src="codigos.js"></script>
 <script>
 /* ===================== STORAGE HELPERS ===================== */
 function loadData(key, fallback){
@@ -1392,9 +1419,104 @@ function formatFecha(f){
   return `${d}/${m}/${y}`;
 }
 
+/* ===================== CÓDIGO DE ACCESO ===================== */
+function sha256(texto){
+  const bytes = new TextEncoder().encode(texto);
+  const K = new Uint32Array([
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+  ]);
+  const H = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+  const largo = bytes.length;
+  const total = ((largo + 9 + 63) >> 6) << 6;
+  const buf = new Uint8Array(total);
+  buf.set(bytes); buf[largo] = 0x80;
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(total - 8, Math.floor(largo * 8 / 0x100000000));
+  dv.setUint32(total - 4, (largo * 8) >>> 0);
+  const w = new Uint32Array(64);
+  const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+  for(let off = 0; off < total; off += 64){
+    for(let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4);
+    for(let i = 16; i < 64; i++){
+      const s0 = rotr(w[i-15], 7) ^ rotr(w[i-15], 18) ^ (w[i-15] >>> 3);
+      const s1 = rotr(w[i-2], 17) ^ rotr(w[i-2], 19) ^ (w[i-2] >>> 10);
+      w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0;
+    }
+    let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+    for(let i = 0; i < 64; i++){
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    H[0] += a; H[1] += b; H[2] += c; H[3] += d; H[4] += e; H[5] += f; H[6] += g; H[7] += h;
+  }
+  return Array.from(H).map(x => x.toString(16).padStart(8, '0')).join('');
+}
+
+const SAL_ACCESO = 'marielis-planillas:';
+function normalizarCodigo(c){ return String(c||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
+function hashCodigo(c){ return sha256(SAL_ACCESO + normalizarCodigo(c)); }
+/* 'ok' | 'pedir' (no tiene código) | 'revocado' (su código ya no está en la lista) | 'sin-lista' */
+function estadoAcceso(){
+  const lista = window.CODIGOS_VALIDOS;
+  const guardado = loadData('app_marielis_licencia', null);
+  if(!Array.isArray(lista)) return guardado ? 'ok' : 'sin-lista';   // sin internet: no se bloquea a quien ya ingresó
+  if(guardado && lista.includes(guardado)) return 'ok';
+  return guardado ? 'revocado' : 'pedir';
+}
+function mostrarAcceso(estado){
+  document.getElementById('emailCaptureWrap').style.display = 'none';
+  document.getElementById('btnEnter').style.display = 'none';
+  document.getElementById('accesoWrap').style.display = 'flex';
+  const msg = document.getElementById('accesoMensaje');
+  const contacto = window.CONTACTO_ACCESO ? String(window.CONTACTO_ACCESO) : '';
+  msg.className = 'acceso-msg';
+  if(estado==='revocado'){
+    msg.textContent = 'Tu acceso ya no está activo. Tus datos siguen guardados en este dispositivo.';
+    msg.classList.add('error');
+    document.getElementById('btnAccesoCopia').style.display = '';
+  } else if(estado==='sin-lista'){
+    msg.textContent = 'No pudimos verificar tu código. Revisá tu conexión a internet e intentá de nuevo.';
+    msg.classList.add('error');
+  } else {
+    msg.textContent = 'Es el código que recibiste al comprar la app. Lo ingresás una sola vez en cada dispositivo.';
+  }
+  document.getElementById('accesoContacto').textContent = contacto ? 'Consultas: '+contacto : '';
+}
+function validarCodigoAcceso(){
+  const msg = document.getElementById('accesoMensaje');
+  const codigo = document.getElementById('inputCodigoAcceso').value;
+  msg.className = 'acceso-msg error';
+  if(normalizarCodigo(codigo).length < 12){ msg.textContent = 'Escribí el código completo (12 letras y números).'; return; }
+  const lista = window.CODIGOS_VALIDOS;
+  if(!Array.isArray(lista)){ msg.textContent = 'No pudimos verificar el código. Revisá tu conexión a internet e intentá de nuevo.'; return; }
+  const h = hashCodigo(codigo);
+  if(!lista.includes(h)){ msg.textContent = 'Ese código no es válido o ya no está activo. Revisalo e intentá de nuevo.'; return; }
+  saveData('app_marielis_licencia', h);
+  document.getElementById('accesoWrap').style.display = 'none';
+  document.getElementById('btnEnter').style.display = '';
+  initWelcome();
+}
+function arrancarConAcceso(){
+  const estado = estadoAcceso();
+  if(estado==='ok'){ initWelcome(); return; }
+  mostrarAcceso(estado);
+}
+
 /* ===================== COPIA DE SEGURIDAD ===================== */
 const COPIA_APP = 'marielis-planillas';
-const COPIA_EXCLUIDAS = ['app_marielis_backup_antes_de_trimestres','app_marielis_backup_antes_de_importar','app_marielis_ultima_copia'];
+const COPIA_EXCLUIDAS = ['app_marielis_backup_antes_de_trimestres','app_marielis_backup_antes_de_importar','app_marielis_ultima_copia','app_marielis_licencia'];
 function datosActuales(){
   const datos = {};
   try{
@@ -1832,7 +1954,7 @@ persistAll = function(){ _persistAllOrig(); updateProgress(); };
 
 migrarDatos();
 applyTheme();
-initWelcome();
+arrancarConAcceso();
 
 /* ===================== PWA: registro del Service Worker ===================== */
 if ('serviceWorker' in navigator) {
