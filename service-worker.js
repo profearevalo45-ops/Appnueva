@@ -1,54 +1,39 @@
-// Service Worker de "Mi Agenda"
-// Cachea el "app shell" para que la app cargue rápido y funcione sin conexión.
+/* Service worker de Planillas Escolares.
+   Estrategia: primero la red (siempre trae la versión más nueva) y, si no hay
+   internet, usa la copia guardada. Así la app se actualiza sola y sigue
+   funcionando sin conexión. No toca los datos de alumnos y notas. */
+const CACHE = 'planillas-v2';
+const ARCHIVOS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
-const CACHE_NAME = 'mi-agenda-v1';
-const APP_SHELL = [
-  './',
-  './index.html',
-  './manifest.json',
-  './icon-192.png',
-  './icon-512.png'
-];
-
-// Instalación: guarda los archivos principales en caché
-self.addEventListener('install', (event) => {
+self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE)
+      .then(cache => Promise.all(ARCHIVOS.map(url => cache.add(url).catch(() => {}))))
       .then(() => self.skipWaiting())
   );
 });
 
-// Activación: borra cachés viejas de versiones anteriores
-self.addEventListener('activate', (event) => {
+self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys
-          .filter((key) => key !== CACHE_NAME)
-          .map((key) => caches.delete(key))
-      )
-    ).then(() => self.clients.claim())
+    caches.keys()
+      .then(claves => Promise.all(claves.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
 });
 
-// Fetch: responde primero desde caché (rápido) y actualiza en segundo plano.
-// Si no hay conexión y no está en caché, muestra el index como respaldo.
-self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
-
+self.addEventListener('fetch', event => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  if (new URL(req.url).origin !== self.location.origin) return;
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const networkFetch = fetch(event.request)
-        .then((networkResponse) => {
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, networkResponse.clone());
-          });
-          return networkResponse;
-        })
-        .catch(() => caches.match('./index.html'));
-
-      return cachedResponse || networkFetch;
-    })
+    fetch(req)
+      .then(res => {
+        if (res && res.ok) {
+          const copia = res.clone();
+          caches.open(CACHE).then(c => c.put(req, copia));
+        }
+        return res;
+      })
+      .catch(() => caches.match(req).then(r => r || caches.match('./index.html')))
   );
 });
